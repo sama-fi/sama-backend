@@ -116,7 +116,7 @@ export async function membership(circleId: string, address: string): Promise<"OR
 /** Private circles are visible only to members; public and invite-only circles to anyone signed in. */
 export async function viewableCircle(id: string, viewer: Address): Promise<CircleRecord> {
   const circle = await getCircle(id);
-  if (circle.visibility === "PRIVATE" && !(await membership(id, viewer))) throw new NotFoundError("This circle does not exist.");
+  if (circle.visibility === "PRIVATE" && !(await membership(id, viewer))) throw new NotFoundError("This circle is private. Ask its organizer to add you.");
   return circle;
 }
 
@@ -139,6 +139,9 @@ export async function joinCircle(circleId: string, address: Address, inviteCode?
 /** Single-use invite. Only its hash is stored, so a database leak does not leak working invites. */
 export async function createInvite(circleId: string, organizer: Address): Promise<string> {
   if ((await membership(circleId, organizer)) !== "ORGANIZER") throw new CircleError("Only the organizer can create invites.");
+  if ((await getCircle(circleId)).visibility === "PRIVATE") {
+    throw new CircleError("Private circles cannot have invite links. Change the circle to invite-only, or add members directly.");
+  }
   const code = randomBytes(12).toString("base64url");
   await (await db()).query("insert into invites (code_hash, circle_id, created_by) values ($1, $2, $3)", [inviteHash(code), circleId, key(organizer)]);
   return code;

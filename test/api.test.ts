@@ -147,6 +147,14 @@ describe("circles and invites", () => {
     expect((await bob.post(`/api/circles/${inviteOnlyId}/join`, { invite: code })).body.error).toMatch(/invalid or has already been used/);
     expect((await anon.get(`/api/invites/${code}`)).body.used).toBe(true);
     expect((await anon.get("/api/invites/nope")).status).toBe(404);
+
+    const created = await alice.post("/api/circles", { name: "Tim Tertutup", description: "", visibility: "PRIVATE", assetSymbols: ["SPYB", "USDT"], cadenceSec: null, durationSec: 3_600, minParticipants: 2, residualBehavior: "CARRY_FORWARD" });
+    expect(created.status).toBe(200);
+    const privateId = created.body.id;
+    const privateInvite = await alice.post(`/api/circles/${privateId}/invite`);
+    expect(privateInvite.status).toBe(409);
+    expect(privateInvite.body.error).toMatch(/Private circles cannot have invite links/);
+    expect((await carol.get(`/api/circles/${privateId}`)).body.error).toBe("This circle is private. Ask its organizer to add you.");
   });
 
   it("non-members cannot open a round, and activity records what happened", async () => {
