@@ -205,7 +205,7 @@ export async function homeView(address: Address): Promise<Home> {
     if (!v) continue;
     const undecided = v.you.decision ? 0 : v.you.residual.filter((r) => !r.dust).reduce((s, r) => s + r.valueUsd, 0);
     if (!c.liveRound && undecided === 0) continue;
-    pending.push({ roundId: v.round.id, circleName: c.name, state: v.round.state, freezesAt: v.round.freezesAt, signed: v.you.signed, approved: v.you.approved, inPlan: v.you.inPlan, residualUndecidedUsd: undecided });
+    pending.push({ roundId: v.round.id, sequence: v.round.sequence, circleName: c.name, state: v.round.state, freezesAt: v.round.freezesAt, signed: v.you.signed, approved: v.you.approved, inPlan: v.you.inPlan, residualUndecidedUsd: undecided });
   }
   return {
     portfolio: wirePortfolio,
