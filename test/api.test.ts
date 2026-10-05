@@ -152,9 +152,11 @@ describe("circles and invites", () => {
     expect(created.status).toBe(200);
     const privateId = created.body.id;
     const privateInvite = await alice.post(`/api/circles/${privateId}/invite`);
-    expect(privateInvite.status).toBe(409);
-    expect(privateInvite.body.error).toMatch(/Private circles cannot have invite links/);
-    expect((await carol.get(`/api/circles/${privateId}`)).body.error).toBe("This circle is private. Ask its organizer to add you.");
+    expect(privateInvite.status).toBe(200);
+    const privateCode = new URL(privateInvite.body.url).pathname.split("/").pop() ?? "";
+    expect((await carol.get(`/api/circles/${privateId}`)).status).toBe(200);
+    expect((await carol.post(`/api/circles/${privateId}/join`, {})).status).toBe(409);
+    expect((await carol.post(`/api/circles/${privateId}/join`, { invite: privateCode })).status).toBe(200);
   });
 
   it("non-members cannot open a round, and activity records what happened", async () => {

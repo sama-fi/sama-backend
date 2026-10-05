@@ -2,3 +2,5 @@ node_modules/
 .sama-db/
 .env
 .env.local
+
+.claude/settings.local.json

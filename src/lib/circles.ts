@@ -97,7 +97,7 @@ export async function getCircle(id: string): Promise<CircleRecord> {
 /** Circles the viewer may see: their own plus every public circle, newest first. */
 export async function visibleCircles(address: string): Promise<CircleRecord[]> {
   const rows = await (await db()).query<CircleRow>(
-    `${SELECT} where c.visibility = 'PUBLIC' or exists (select 1 from memberships m where m.circle_id = c.id and m.address = $1) order by c.created_at desc`,
+    `${SELECT} where c.visibility in ('PUBLIC', 'PRIVATE') or exists (select 1 from memberships m where m.circle_id = c.id and m.address = $1) order by c.created_at desc`,
     [key(address)],
   );
   return rows.map(toCircle);
@@ -114,20 +114,18 @@ export async function membership(circleId: string, address: string): Promise<"OR
 }
 
 /** Private circles are visible only to members; public and invite-only circles to anyone signed in. */
-export async function viewableCircle(id: string, viewer: Address): Promise<CircleRecord> {
-  const circle = await getCircle(id);
-  if (circle.visibility === "PRIVATE" && !(await membership(id, viewer))) throw new NotFoundError("This circle is private. Ask its organizer to add you.");
-  return circle;
+/** Private circles are unlisted (see visibleCircles), but anyone with the link or code can open them. */
+export async function viewableCircle(id: string, _viewer: Address): Promise<CircleRecord> {
+  return getCircle(id);
 }
 
-/** Idempotent. Invite-only circles consume a single-use invite; private circles cannot be joined from outside. */
+/** Idempotent. Public circles join freely; private and invite-only circles need a single-use invite code. */
 export async function joinCircle(circleId: string, address: Address, inviteCode?: string): Promise<void> {
   const circle = await getCircle(circleId);
   if (await membership(circleId, address)) return;
   await ensureUser(address);
   const joined = await (await db()).tx(async (t) => {
-    if (circle.visibility === "PRIVATE") throw new CircleError("Private circles are joined only when the organizer adds you.");
-    if (circle.visibility === "INVITE_ONLY") {
+    if (circle.visibility !== "PUBLIC") {
       const used = await t.query("update invites set used_by = $3, used_at = now() where code_hash = $1 and circle_id = $2 and used_by is null returning code_hash", [inviteHash(inviteCode ?? ""), circleId, key(address)]);
       if (used.length === 0) throw new CircleError("That invite code is invalid or has already been used.");
     }
@@ -139,9 +137,6 @@ export async function joinCircle(circleId: string, address: Address, inviteCode?
 /** Single-use invite. Only its hash is stored, so a database leak does not leak working invites. */
 export async function createInvite(circleId: string, organizer: Address): Promise<string> {
   if ((await membership(circleId, organizer)) !== "ORGANIZER") throw new CircleError("Only the organizer can create invites.");
-  if ((await getCircle(circleId)).visibility === "PRIVATE") {
-    throw new CircleError("Private circles cannot have invite links. Change the circle to invite-only, or add members directly.");
-  }
   const code = randomBytes(12).toString("base64url");
   await (await db()).query("insert into invites (code_hash, circle_id, created_by) values ($1, $2, $3)", [inviteHash(code), circleId, key(organizer)]);
   return code;
