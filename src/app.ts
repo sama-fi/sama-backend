@@ -19,6 +19,7 @@ import { approvalPayload, closeCollection, currentOrOpenRound, getRound, intentS
 import { clearedSessionCookie, requireSession, sessionCookie, type Session } from "./lib/session.ts";
 import { checkTarget, normalizeTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
 import { getSettings, getTarget, listActivity, saveSettings, saveTarget, settingsProblems, upsertUser } from "./lib/users.ts";
+import { syncTransfers } from "./lib/transfers.ts";
 import { clearPreview, homeView, roundView } from "./lib/views.ts";
 
 type Ctx = { request: Request; params: Record<string, string>; body: unknown; query: Record<string, string | undefined> };
@@ -182,6 +183,8 @@ export function createApp() {
         return getSettings(session.address);
       }))
       .get("/api/me/activity", authed(async ({ session }) => ({ activity: await listActivity(session.address) })))
+      // The wallet sends a token itself; this scans the chain right away so the transfer shows in Activity without waiting for the cron.
+      .post("/api/me/transfers/sync", authed(async () => ({ ok: true, ...(await syncTransfers()) })))
 
       // Circles --------------------------------------------------------------------------------------------------------
       .get("/api/circles", authed(async ({ session }) => ({ circles: await Promise.all((await visibleCircles(session.address)).map((c) => circleView(c, session.address))) })))

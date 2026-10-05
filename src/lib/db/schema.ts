@@ -186,4 +186,26 @@ alter table asset_checks enable row level security;
 alter table schema_migrations enable row level security;
 `,
   },
+  {
+    // ERC-20 Transfer logs touching a Sama user, from any token. Keyed by tx and log index so rescans never double count.
+    id: "003_transfers",
+    sql: `
+create table transfers (
+  tx_hash text not null,
+  log_index integer not null,
+  token text not null,
+  from_addr text not null,
+  to_addr text not null,
+  amount_raw text not null,
+  block_number bigint not null,
+  block_time timestamptz not null,
+  primary key (tx_hash, log_index)
+);
+create index transfers_to_idx on transfers (to_addr);
+create index transfers_from_idx on transfers (from_addr);
+create table chain_cursor (name text primary key, block bigint not null);
+alter table transfers enable row level security;
+alter table chain_cursor enable row level security;
+`,
+  },
 ];

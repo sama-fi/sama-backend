@@ -88,7 +88,7 @@ export async function saveTarget(address: Address, target: Omit<SavedTarget, "up
 }
 
 /** Must match the frontend's activity templates (sama-frontend/lib/i18n, `activity.kinds`) and their {placeholders}. */
-export type ActivityKind = "TARGET_SAVED" | "CIRCLE_CREATED" | "CIRCLE_JOINED" | "INTENT_SIGNED" | "ROUND_MATCHED" | "ROUND_NO_CROSS" | "PLAN_APPROVED" | "SETTLED" | "RESIDUAL_DECIDED";
+export type ActivityKind = "TARGET_SAVED" | "CIRCLE_CREATED" | "CIRCLE_JOINED" | "INTENT_SIGNED" | "ROUND_MATCHED" | "ROUND_NO_CROSS" | "PLAN_APPROVED" | "SETTLED" | "RESIDUAL_DECIDED" | "TRANSFER_IN" | "TRANSFER_OUT";
 
 export async function logActivity(address: string, kind: ActivityKind, detail: Record<string, string | number>, refs: { roundId?: string; circleId?: string } = {}) {
   await (await db()).query("insert into activity (address, kind, round_id, circle_id, detail) values ($1, $2, $3, $4, $5::text::jsonb)", [key(address), kind, refs.roundId ?? null, refs.circleId ?? null, toJson(detail)]);
