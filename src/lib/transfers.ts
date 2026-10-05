@@ -4,6 +4,7 @@ import { db } from "./db/client.ts";
 import { deps } from "./deps.ts";
 import { env } from "./env.ts";
 import { log } from "./log.ts";
+import { listedToken } from "./token-list.ts";
 import { key, logActivity } from "./users.ts";
 
 const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
@@ -71,7 +72,7 @@ const ERC20_META = [
   { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
 ] as const;
 
-type TokenMeta = { symbol: string; decimals: number | null };
+type TokenMeta = { symbol: string; decimals: number | null; logo: string };
 const metaCache = new Map<string, TokenMeta>();
 const addressOf = (topic: Hex) => `0x${topic.slice(26)}`.toLowerCase();
 
@@ -81,6 +82,13 @@ async function tokenMeta(token: string, registry: Map<string, TokenMeta>, client
   if (known) return known;
   const cached = metaCache.get(token);
   if (cached) return cached;
+  // PancakeSwap's list names and logos the tokens people hold; its symbol is curated, unlike the one on the contract.
+  const listed = await listedToken(token);
+  if (listed) {
+    const meta: TokenMeta = { symbol: listed.symbol, decimals: listed.decimals, logo: listed.logoURI };
+    metaCache.set(token, meta);
+    return meta;
+  }
   const read = async <T>(functionName: "symbol" | "decimals") => {
     try {
       return (await client.readContract({ address: token as Hex, abi: ERC20_META, functionName })) as T;
@@ -88,7 +96,9 @@ async function tokenMeta(token: string, registry: Map<string, TokenMeta>, client
       return undefined;
     }
   };
-  const meta: TokenMeta = { symbol: (await read<string>("symbol")) ?? "UNKNOWN", decimals: (await read<number>("decimals")) ?? null };
+  // Symbols on tokens outside the registry are set by whoever deployed them, so they are never shown as a name.
+  // Decimals still come from the chain so the amount reads correctly; the token address stays in the activity detail.
+  const meta: TokenMeta = { symbol: "UNKNOWN", decimals: (await read<number>("decimals")) ?? null, logo: "" };
   metaCache.set(token, meta);
   return meta;
 }
@@ -104,7 +114,7 @@ export async function syncTransfers(): Promise<{ scannedTo: string; recorded: nu
   const users = new Set((await database.query<{ address: string }>("select address from users")).map((r) => key(r.address)));
   const settlements = new Set((await database.query<{ tx: string }>("select settlement_tx as tx from rounds where settlement_tx is not null")).map((r) => r.tx.toLowerCase()));
   const registry = new Map<string, TokenMeta>();
-  for (const a of [d.registry().cash(), ...d.registry().stocks()]) registry.set(a.contractAddress.toLowerCase(), { symbol: a.symbol, decimals: a.decimals });
+  for (const a of [d.registry().cash(), ...d.registry().stocks()]) registry.set(a.contractAddress.toLowerCase(), { symbol: a.symbol, decimals: a.decimals, logo: "" });
 
   const blockTimes = new Map<bigint, Date>();
   const blockTime = async (n: bigint) => {
@@ -184,7 +194,7 @@ async function record(
   if (inserted.length === 0 || settlements.has(tx)) return inserted.length;
 
   const meta = await tokenMeta(token, registry, client);
-  const detail = { symbol: meta.symbol, amount: meta.decimals === null ? amount.toString() : formatUnits(amount, meta.decimals), token, tx };
+  const detail = { symbol: meta.symbol, amount: meta.decimals === null ? amount.toString() : formatUnits(amount, meta.decimals), token, tx, logo: meta.logo };
   if (users.has(to)) await logActivity(to, "TRANSFER_IN", { ...detail, counterparty: from });
   if (users.has(from)) await logActivity(from, "TRANSFER_OUT", { ...detail, counterparty: to });
   return 1;
