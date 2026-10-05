@@ -10,7 +10,8 @@ import { key, logActivity } from "./users.ts";
  * Polling, not a socket: the chain has no push to a server, and the UI only needs the list refreshed.
  */
 const TRANSFER_TOPIC = toEventSelector("Transfer(address,address,uint256)");
-const CHUNK = 2_000n;
+const CHUNK = 500n;
+const MIN_CHUNK = 10n;
 const FIRST_SCAN_BLOCKS = 300n;
 
 const ERC20_META = [
@@ -63,21 +64,30 @@ export async function syncTransfers(): Promise<{ scannedTo: string; recorded: nu
   };
 
   let recorded = 0;
+  // RPC providers cap how many blocks one eth_getLogs may span. Start at CHUNK and halve on that error, down to MIN_CHUNK.
+  let chunk = CHUNK;
   while (from <= latest && users.size > 0) {
-    const to = from + CHUNK - 1n < latest ? from + CHUNK - 1n : latest;
-    for (const user of users) {
-      const topic = pad(user as Hex, { size: 32 });
-      const filters = [
-        [TRANSFER_TOPIC, null, topic],
-        [TRANSFER_TOPIC, topic],
-      ] as const;
-      for (const topics of filters) {
-        const logs = await getRawLogs(client, from, to, topics as unknown as (Hex | null)[]);
-        for (const l of logs) {
-          const inserted = await record(l, users, settlements, registry, client, blockTime);
-          recorded += inserted;
+    const to = from + chunk - 1n < latest ? from + chunk - 1n : latest;
+    try {
+      for (const user of users) {
+        const topic = pad(user as Hex, { size: 32 });
+        const filters = [
+          [TRANSFER_TOPIC, null, topic],
+          [TRANSFER_TOPIC, topic],
+        ] as const;
+        for (const topics of filters) {
+          const logs = await getRawLogs(client, from, to, topics as unknown as (Hex | null)[]);
+          for (const l of logs) {
+            recorded += await record(l, users, settlements, registry, client, blockTime);
+          }
         }
       }
+    } catch (error) {
+      if (chunk > MIN_CHUNK && /exceed|limit|range|too many/i.test((error as Error).message)) {
+        chunk = chunk / 2n;
+        continue;
+      }
+      throw error;
     }
     await database.query("insert into chain_cursor (name, block) values ('transfers', $1) on conflict (name) do update set block = excluded.block", [to.toString()]);
     from = to + 1n;
