@@ -1,0 +1,19 @@
+version: v1.0
+name: Sama backend deploy
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu2204
+
+blocks:
+  - name: Deploy
+    task:
+      # sama-vps holds VPS_HOST, VPS_USER, and the deploy key at ~/.ssh/id_ed25519.
+      secrets:
+        - name: sama-vps
+      jobs:
+        - name: ssh deploy
+          commands:
+            - checkout
+            - chmod 600 ~/.ssh/id_ed25519
+            - ssh -o StrictHostKeyChecking=accept-new "$VPS_USER@$VPS_HOST" "bash -s" < scripts/deploy-remote.sh

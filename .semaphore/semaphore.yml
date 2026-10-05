@@ -1,0 +1,27 @@
+version: v1.0
+name: Sama backend
+agent:
+  machine:
+    type: e1-standard-2
+    os_image: ubuntu2204
+
+# Every push runs the offline tests. Deploy is a manual promotion: press Deploy in Semaphore.
+blocks:
+  - name: Test
+    task:
+      jobs:
+        - name: bun test
+          commands:
+            - checkout
+            - curl -fsSL https://bun.sh/install | bash
+            - export PATH="$HOME/.bun/bin:$PATH"
+            - git clone --depth 1 https://github.com/edison-alpha/sama-packages.git ../sama-packages
+            - cd ../sama-packages && bun install && cd -
+            - bun install
+            - bun test
+
+promotions:
+  - name: Deploy to VPS
+    pipeline_file: deploy.yml
+    auto_promote:
+      when: "false"
