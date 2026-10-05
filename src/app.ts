@@ -18,13 +18,27 @@ import { decide, swapBuild, swapPrepare, swapRecord } from "./lib/residuals.ts";
 import { approvalPayload, closeCollection, currentOrOpenRound, getRound, intentSigningPayload, prepareIntent, recordSettlement, settleCall, submitApproval, submitIntent } from "./lib/rounds.ts";
 import { clearedSessionCookie, requireSession, sessionCookie, type Session } from "./lib/session.ts";
 import { checkTarget, normalizeTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
-import { getSettings, getTarget, listActivity, saveSettings, saveTarget, settingsProblems, upsertUser } from "./lib/users.ts";
+import { getSettings, getTarget, onboardingDone, pageActivity, saveOnboardingDone, saveSettings, saveTarget, settingsProblems, upsertUser, type ActivityGroup, type ActivityQuery } from "./lib/users.ts";
 import { syncTransfers } from "./lib/transfers.ts";
 import { clearPreview, homeView, roundView } from "./lib/views.ts";
 
 type Ctx = { request: Request; params: Record<string, string>; body: unknown; query: Record<string, string | undefined> };
 type Run = (input: { session: Session; params: Record<string, string>; body: unknown; query: Record<string, string | undefined>; request: Request }) => Promise<unknown>;
 type PublicRun = (input: { params: Record<string, string>; body: unknown; query: Record<string, string | undefined>; request: Request }) => Promise<unknown>;
+
+const ACTIVITY_GROUPS: readonly ActivityGroup[] = ["rounds", "circles", "targets", "leftovers", "transfers"];
+const ACTIVITY_RANGE_DAYS: Record<string, number> = { week: 7, month: 30 };
+
+/** Reads the Activity page's query string; anything malformed is a 400, not a silent full list. */
+function activityQuery(query: Record<string, string | undefined>): ActivityQuery {
+  const limit = query.limit === undefined ? 30 : Number(query.limit);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new InputError("limit must be a whole number from 1 to 100.");
+  const group = query.group === undefined || query.group === "all" ? null : query.group;
+  if (group !== null && !(ACTIVITY_GROUPS as readonly string[]).includes(group)) throw new InputError("Unknown activity group.");
+  const days = query.range === undefined || query.range === "all" ? null : ACTIVITY_RANGE_DAYS[query.range];
+  if (query.range !== undefined && query.range !== "all" && days === undefined) throw new InputError("Unknown activity range.");
+  return { limit, cursor: query.cursor ?? null, group: group as ActivityGroup | null, sinceMs: days ? Date.now() - days * 86_400_000 : null };
+}
 
 /** Bigints cross the wire as {"$bigint": "..."}; the frontend's live client revives them. */
 function json(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -104,9 +118,9 @@ export function createApp() {
           const { token, address } = (ctx.body ?? {}) as { token?: string; address?: string };
           if (!token || !address) return json({ error: "token and address are required" }, 400);
           const identity = await deps().verifyPrivy(token, address);
-          await upsertUser({ address: identity.address, privyUserId: identity.privyUserId, walletKind: identity.walletKind, email: identity.email });
+          const user = await upsertUser({ address: identity.address, privyUserId: identity.privyUserId, walletKind: identity.walletKind, email: identity.email });
           const cookie = await sessionCookie({ address: identity.address, privyUserId: identity.privyUserId, walletKind: identity.walletKind });
-          return json({ user: { address: identity.address } }, 200, { "set-cookie": cookie });
+          return json({ user: { address: identity.address, onboardingDone: user.onboardingDone } }, 200, { "set-cookie": cookie });
         } catch (error) {
           if (error instanceof AuthError) return json({ error: error.message }, 401);
           log("session.error", { error: (error as Error).message.split("\n")[0] }, "error");
@@ -115,7 +129,7 @@ export function createApp() {
       })
       .get("/api/session", async ({ request }) => {
         const session = await requireSession(request).catch(() => undefined);
-        return json({ user: session ? { address: session.address } : null });
+        return json({ user: session ? { address: session.address, onboardingDone: await onboardingDone(session.address) } : null });
       })
       .delete("/api/session", () => json({ ok: true }, 200, { "set-cookie": clearedSessionCookie() }))
       // Local development and e2e scripts only: sign "Sama dev login <address> <unix seconds>" with the wallet's key.
@@ -126,8 +140,8 @@ export function createApp() {
         const match = /^Sama dev login (0x[0-9a-fA-F]{40}) (\d+)$/.exec(message);
         if (!match || match[1]?.toLowerCase() !== address.toLowerCase() || Math.abs(deps().nowSec() - Number(match[2])) > 300) return json({ error: "Stale or malformed dev login message." }, 401);
         if (!(await verifyMessage({ address: getAddress(address), message, signature }))) return json({ error: "Signature does not match the address." }, 401);
-        await upsertUser({ address: getAddress(address), walletKind: "dev" });
-        return json({ user: { address: getAddress(address) } }, 200, { "set-cookie": await sessionCookie({ address: getAddress(address), privyUserId: null, walletKind: "dev" }) });
+        const user = await upsertUser({ address: getAddress(address), walletKind: "dev" });
+        return json({ user: { address: getAddress(address), onboardingDone: user.onboardingDone } }, 200, { "set-cookie": await sessionCookie({ address: getAddress(address), privyUserId: null, walletKind: "dev" }) });
       })
 
       // Assets, invites and proof (public) -------------------------------------------------------------------------------
@@ -182,7 +196,18 @@ export function createApp() {
         await saveSettings(session.address, s);
         return getSettings(session.address);
       }))
-      .get("/api/me/activity", authed(async ({ session }) => ({ activity: await listActivity(session.address) })))
+      .get("/api/me/onboarding", authed(async ({ session }) => ({ onboardingDone: await onboardingDone(session.address) })))
+      .post("/api/me/onboarding", authed(async ({ session, body }) => {
+        const done = (body as { done?: unknown })?.done;
+        if (typeof done !== "boolean") throw new InputError("done must be a boolean.");
+        await saveOnboardingDone(session.address, done);
+        return { onboardingDone: done };
+      }))
+      // One page at a time: `limit` (default 30), `cursor` from the last response, `group` and `range` filter on the server.
+      .get("/api/me/activity", authed(async ({ session, query }) => {
+        const page = await pageActivity(session.address, activityQuery(query));
+        return { activity: page.items, nextCursor: page.nextCursor };
+      }))
       // The wallet sends a token itself; this scans the chain right away so the transfer shows in Activity without waiting for the cron.
       .post("/api/me/transfers/sync", authed(async () => ({ ok: true, ...(await syncTransfers()) })))
 

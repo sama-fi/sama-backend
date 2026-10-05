@@ -1,7 +1,7 @@
 /**
  * Product database schema. Offchain state only: users, targets, circles, rounds, intents, approvals, residual decisions
- * and activity. Balances, prices and settlements are always re-read from BNB Chain. Ported from Venue0 (001-004 folded
- * into one migration) plus the Sama additions. Each entry runs once, in order, and is recorded in schema_migrations.
+ * and activity. Balances, prices and settlements are always re-read from BNB Chain. Each entry runs once, in
+ * order, and is recorded in schema_migrations.
  */
 export const MIGRATIONS: ReadonlyArray<{ id: string; sql: string }> = [
   {
@@ -162,6 +162,12 @@ create index activity_by_address on activity(address, created_at desc);
 create index rounds_by_circle on rounds(circle_id, sequence desc);
 create index rounds_by_state on rounds(state);
 create index snapshots_by_address on portfolio_snapshots(address, at desc);
+`,
+  },
+  {
+    id: "004_onboarding",
+    sql: `
+alter table users add column if not exists onboarding_done boolean not null default false;
 `,
   },
   {

@@ -1,6 +1,6 @@
 # sama-backend
 
-Sama API on [Elysia](https://elysiajs.com) and Bun, ported from `venue0-backend` (Next route handlers) to the bStocks
+Sama API on [Elysia](https://elysiajs.com) and Bun, for the bStocks
 universe on BNB Chain. It serves `sama-frontend` (`NEXT_PUBLIC_SAMA_API_MODE=live`) on port 3300.
 
 ```

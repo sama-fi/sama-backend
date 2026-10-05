@@ -42,7 +42,7 @@ export function resetDisplayCache() {
   display = undefined;
 }
 
-const DISCLOSURE = "bStock issued by Binance. Each token is backed 1:1 by the underlying share held by Nest Clearing and Custody (ADGM). Sama is software, not investment advice, and does not decide whether you may trade an asset.";
+const DISCLOSURE = "bStock issued by Binance. Each token is backed 1:1 by the underlying share held by Nest Clearing and Custody (ADGM). Sama coordinates the trades you choose; it gives no investment advice and does not decide whether you may trade an asset.";
 
 export function toWireAsset(a: CanonicalAsset, price: bigint | undefined): Asset {
   return {

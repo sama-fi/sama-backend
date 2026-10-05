@@ -44,7 +44,7 @@ afterAll(async () => {
 describe("session", () => {
   it("binds the dev-login wallet to an httpOnly cookie and reports it", async () => {
     expect(alice.cookie).toMatch(/^sama_session=/);
-    expect((await alice.get("/api/session")).body).toEqual({ user: { address: alice.address } });
+    expect((await alice.get("/api/session")).body).toEqual({ user: { address: alice.address, onboardingDone: false } });
     const anon = new Client(app, DEV_KEYS[3]);
     expect((await anon.get("/api/session")).body).toEqual({ user: null });
     expect((await anon.get("/api/me/settings")).status).toBe(401);
@@ -66,6 +66,14 @@ describe("session", () => {
     const out = await signedIn.call("DELETE", "/api/session");
     expect(out.status).toBe(200);
     expect(signedIn.cookie).toBe("sama_session=");
+  });
+
+  it("persists onboarding per user and exposes it to the session guard", async () => {
+    expect((await alice.get("/api/me/onboarding")).body).toEqual({ onboardingDone: false });
+    expect((await alice.post("/api/me/onboarding", { done: true })).body).toEqual({ onboardingDone: true });
+    expect((await alice.get("/api/me/onboarding")).body).toEqual({ onboardingDone: true });
+    expect((await alice.get("/api/session")).body).toEqual({ user: { address: alice.address, onboardingDone: true } });
+    expect((await bob.get("/api/me/onboarding")).body).toEqual({ onboardingDone: false });
   });
 });
 
