@@ -4,7 +4,7 @@ import { db } from "./db/client.ts";
 import { deps } from "./deps.ts";
 import { env } from "./env.ts";
 import { log } from "./log.ts";
-import { listedToken } from "./token-list.ts";
+import { listedToken } from "@sama/tokens";
 import { key, logActivity } from "./users.ts";
 
 const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
