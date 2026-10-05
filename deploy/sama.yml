@@ -1,0 +1,13 @@
+---
+# Run from Semaphore UI (template "Deploy Sama BE"). Pulls both repos on the VPS,
+# installs dependencies, restarts sama-backend.service, and waits for /api/health.
+- name: Deploy sama-backend
+  hosts: vps
+  gather_facts: false
+  tasks:
+    - name: Run deploy-remote.sh on the VPS
+      ansible.builtin.script: "{{ playbook_dir }}/../scripts/deploy-remote.sh"
+      register: deploy
+    - name: Show deploy output
+      ansible.builtin.debug:
+        var: deploy.stdout_lines
