@@ -1,0 +1,27 @@
+{
+  "name": "@sama/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "bun scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@elysiajs/cors": "1.4.0",
+    "elysia": "1.4.13",
+    "jose": "6.1.0",
+    "postgres": "3.4.9",
+    "viem": "2.56.7",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.4",
+    "@types/node": "^24.13.5",
+    "typescript": "6.0.3"
+  }
+}
