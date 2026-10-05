@@ -15,6 +15,8 @@ function read() {
     production,
     port: Number(e.PORT ?? 3300),
     rpcUrl: e.BSC_RPC_URL || BSC_PUBLIC_RPC,
+    /** Optional wss:// endpoint for realtime transfer logs. Polling runs regardless, so a dropped socket loses nothing. */
+    wsUrl: e.BSC_WS_URL || undefined,
     /** A different provider than rpcUrl, so verification is independent of the executor's view of the chain. */
     verifierRpcUrl: e.VERIFIER_RPC_URL || "https://bsc-rpc.publicnode.com",
     settlementContract: settlement as Address,

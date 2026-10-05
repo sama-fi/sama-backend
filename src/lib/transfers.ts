@@ -1,8 +1,60 @@
-import { formatUnits, numberToHex, pad, toEventSelector, type Hex, type Log, type PublicClient } from "viem";
+import { bscChain } from "@sama/shared";
+import { createPublicClient, formatUnits, numberToHex, pad, parseAbiItem, toEventSelector, webSocket, type Hex, type Log, type PublicClient } from "viem";
 import { db } from "./db/client.ts";
 import { deps } from "./deps.ts";
+import { env } from "./env.ts";
 import { log } from "./log.ts";
 import { key, logActivity } from "./users.ts";
+
+const TRANSFER_EVENT = parseAbiItem("event Transfer(address indexed from, address indexed to, uint256 value)");
+
+type ScanContext = {
+  users: Set<string>;
+  settlements: Set<string>;
+  registry: Map<string, TokenMeta>;
+  client: PublicClient;
+  blockTime: (n: bigint) => Promise<Date>;
+};
+
+let liveContext: ScanContext | undefined;
+let liveClient: PublicClient | undefined;
+const subscriptions = new Map<string, Array<() => void>>();
+
+/**
+ * Realtime path: one eth_subscribe per user and direction, so a transfer reaches the activity list in seconds. The
+ * polling job keeps running, which catches anything a dropped socket missed and makes the two paths agree (dedupe).
+ */
+function reconcileRealtime(ctx: ScanContext) {
+  const { wsUrl, rpcUrl } = env();
+  if (!wsUrl) return;
+  liveContext = ctx;
+  liveClient ??= createPublicClient({ chain: bscChain(rpcUrl), transport: webSocket(wsUrl, { reconnect: true }) }) as PublicClient;
+
+  const onLogs = async (logs: unknown[]) => {
+    const c = liveContext;
+    if (!c) return;
+    for (const l of logs as Log[]) {
+      await record(l, c.users, c.settlements, c.registry, c.client, c.blockTime).catch((error: Error) =>
+        log("transfers.live_failed", { error: error.message.split("\n")[0] }, "error"),
+      );
+    }
+  };
+  const onError = (error: Error) => log("transfers.ws_error", { error: error.message.split("\n")[0] }, "error");
+
+  for (const user of ctx.users) {
+    if (subscriptions.has(user)) continue;
+    const stops = [
+      liveClient.watchEvent({ event: TRANSFER_EVENT, args: { to: user as Hex }, onLogs, onError }),
+      liveClient.watchEvent({ event: TRANSFER_EVENT, args: { from: user as Hex }, onLogs, onError }),
+    ];
+    subscriptions.set(user, stops);
+  }
+  for (const [user, stops] of subscriptions) {
+    if (ctx.users.has(user)) continue;
+    stops.forEach((stop) => stop());
+    subscriptions.delete(user);
+  }
+}
 
 /**
  * Finds ERC-20 transfers into and out of every Sama user, from any token, by scanning Transfer logs on BSC. Each log is
@@ -64,6 +116,8 @@ export async function syncTransfers(): Promise<{ scannedTo: string; recorded: nu
   };
 
   let recorded = 0;
+  reconcileRealtime({ users, settlements, registry, client, blockTime });
+
   // RPC providers cap how many blocks one eth_getLogs may span. Start at CHUNK and halve on that error, down to MIN_CHUNK.
   let chunk = CHUNK;
   while (from <= latest && users.size > 0) {
