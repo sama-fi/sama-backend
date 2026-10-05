@@ -1,8 +1,9 @@
-import { getAddress, isAddress, type Address } from "viem";
+import { formatUnits, getAddress, isAddress, type Address } from "viem";
 import { readBalances, valueUsdE18, wireUid, type CanonicalAsset } from "@sama/assets";
 import type { Asset, Portfolio } from "@sama/api-types";
 import { E18, parseDecimal, type AssetUid } from "@sama/shared";
 import { deps } from "./deps.ts";
+import { bnbUsd, extraHoldings, type ExtraHolding } from "./holdings.ts";
 import { timed } from "./log.ts";
 
 const DISPLAY_TTL_MS = 5_000;
@@ -70,7 +71,7 @@ export async function assetList(): Promise<Asset[]> {
 export type Holding = { asset: CanonicalAsset; rawBalance: bigint; priceE18: bigint; valueE18: bigint };
 
 export type LoadedPortfolio =
-  | { ok: true; address: Address; holdings: Holding[]; totalE18: bigint; readAt: string; unpriced: string[] }
+  | { ok: true; address: Address; holdings: Holding[]; totalE18: bigint; readAt: string; unpriced: string[]; extras: ExtraHolding[]; bnb?: number | undefined }
   | { ok: false; detail: string };
 
 /** Live balances of every allowlisted asset in one multicall, valued at display prices. */
@@ -96,16 +97,21 @@ export async function loadPortfolio(input: string): Promise<LoadedPortfolio> {
     })
     .sort((a, b) => (b.valueE18 > a.valueE18 ? 1 : b.valueE18 < a.valueE18 ? -1 : 0));
   const totalE18 = holdings.reduce((s, h) => s + h.valueE18, 0n);
-  return { ok: true, address, holdings, totalE18, readAt: new Date().toISOString(), unpriced };
+  const extras = await extraHoldings(address).catch(() => [] as ExtraHolding[]);
+  const bnb = extras.some((t) => t.native) ? await bnbUsd() : undefined;
+  return { ok: true, address, holdings, totalE18, readAt: new Date().toISOString(), unpriced, extras, bnb };
 }
 
 export function toWirePortfolio(p: LoadedPortfolio): Portfolio {
   if (!p.ok) return { ok: false, detail: p.detail };
-  const total = usd(p.totalE18);
-  return {
-    ok: true,
-    totalUsd: total,
-    readAt: p.readAt,
-    positions: p.holdings.map((h) => ({ symbol: h.asset.symbol, amountTokens: tokensOf(h.rawBalance), valueUsd: usd(h.valueE18), pct: total > 0 ? (usd(h.valueE18) / total) * 100 : 0 })),
-  };
+  // Extra holdings (BNB, listed tokens) are priced only where a source exists; the rest show their amount with no value.
+  const extra = p.extras.map((t) => {
+    const amountTokens = Number(formatUnits(t.rawBalance, t.decimals));
+    const price = t.native ? p.bnb : undefined;
+    return { symbol: t.symbol, amountTokens, valueUsd: price === undefined ? 0 : amountTokens * price, logo: t.logo, priced: price !== undefined };
+  });
+  const registry = p.holdings.map((h) => ({ symbol: h.asset.symbol, amountTokens: tokensOf(h.rawBalance), valueUsd: usd(h.valueE18), logo: "", priced: true }));
+  const totalUsd = usd(p.totalE18) + extra.reduce((sum, e) => sum + e.valueUsd, 0);
+  const positions = [...registry, ...extra].map((x) => ({ ...x, pct: totalUsd > 0 ? (x.valueUsd / totalUsd) * 100 : 0 }));
+  return { ok: true, totalUsd, readAt: p.readAt, positions };
 }
