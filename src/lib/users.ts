@@ -1,6 +1,8 @@
 import { getAddress, type Address } from "viem";
 import type { Activity, ResidualStyle, Settings } from "@sama/api-types";
+import { listedToken } from "@sama/tokens";
 import { db, fromJson, toJson } from "./db/client.ts";
+import { deps } from "./deps.ts";
 
 /** Addresses are stored lowercase so lookups never depend on checksum casing. */
 export const key = (address: string) => address.toLowerCase();
@@ -99,5 +101,19 @@ export async function listActivity(address: string, limit = 100): Promise<Activi
     "select id, kind, round_id, detail, created_at from activity where address = $1 order by created_at desc, id desc limit $2",
     [key(address), limit],
   );
-  return rows.map((r) => ({ id: String(r.id), kind: r.kind, detail: fromJson<Record<string, string | number>>(r.detail), roundId: r.round_id, createdAt: new Date(r.created_at).toISOString() }));
+  const items: Activity[] = rows.map((r) => ({ id: String(r.id), kind: r.kind, detail: fromJson<Record<string, string | number>>(r.detail), roundId: r.round_id, createdAt: new Date(r.created_at).toISOString() }));
+  return Promise.all(items.map((a) => (a.kind === "TRANSFER_IN" || a.kind === "TRANSFER_OUT" ? relabelTransfer(a) : a)));
+}
+
+/**
+ * Transfer rows are named from the current registry and PancakeSwap list, not from whatever the token contract said when
+ * the row was written. That keeps older rows right too: an unlisted token reads UNKNOWN, with no logo.
+ */
+async function relabelTransfer(a: Activity): Promise<Activity> {
+  const token = String(a.detail.token ?? "").toLowerCase();
+  const asset = deps().registry().all().find((x) => x.contractAddress.toLowerCase() === token);
+  const listed = asset ? undefined : await listedToken(token);
+  const symbol = asset?.symbol ?? listed?.symbol ?? "UNKNOWN";
+  const logo = listed?.logoURI ?? "";
+  return { ...a, detail: { ...a.detail, symbol, logo } };
 }
