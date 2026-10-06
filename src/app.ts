@@ -17,7 +17,7 @@ import { assetList, loadPortfolio, toWirePortfolio } from "./lib/market.ts";
 import { decide, swapBuild, swapPrepare, swapRecord } from "./lib/residuals.ts";
 import { approvalPayload, closeCollection, currentOrOpenRound, getRound, intentSigningPayload, prepareIntent, recordSettlement, settleCall, submitApproval, submitIntent } from "./lib/rounds.ts";
 import { clearedSessionCookie, requireSession, sessionCookie, type Session } from "./lib/session.ts";
-import { assist } from "./lib/assistant.ts";
+import { chatAssist, deleteAllChats, deleteChat, getChat, listChats } from "./lib/assistant-chats.ts";
 import { agentInterpreter, checkTarget, normalizeTarget, suggestTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
 import { getSettings, getTarget, onboardingDone, pageActivity, saveOnboardingDone, saveSettings, saveTarget, settingsProblems, upsertUser, type ActivityGroup, type ActivityQuery } from "./lib/users.ts";
 import { syncTransfers } from "./lib/transfers.ts";
@@ -83,11 +83,6 @@ const open = (fn: PublicRun) => (ctx: Ctx) => handle(ctx, fn, false);
 const str = (v: unknown, name: string): string => {
   if (typeof v !== "string" || !v) throw new InputError(`${name} is required.`);
   return v;
-};
-/** The assistant takes { messages: [{ role, content }] }; a bare { message } still works as a one-turn chat. */
-const legacyTurns = (body: unknown): unknown => {
-  const b = (body ?? {}) as { messages?: unknown; message?: unknown };
-  return b.messages ?? [{ role: "user", content: str(b.message, "message") }];
 };
 const hex = (v: unknown, name: string): Hex => {
   const s = str(v, name);
@@ -183,7 +178,14 @@ export function createApp() {
       }))
       // AI helper: turns a sentence into weights the user then edits and saves. Off unless a provider key is set.
       .get("/api/agent", open(async () => ({ enabled: agentInterpreter() !== null })))
-      .post("/api/me/assistant", authed(async ({ session, body }) => assist(session.address, legacyTurns(body))))
+      .post("/api/me/assistant", authed(async ({ session, body }) => {
+        const b = (body ?? {}) as { chatId?: unknown; message?: unknown };
+        return chatAssist(session.address, typeof b.chatId === "string" && b.chatId ? b.chatId : undefined, str(b.message, "message"));
+      }))
+      .get("/api/me/chats", authed(async ({ session }) => ({ chats: await listChats(session.address) })))
+      .get("/api/me/chats/:id", authed(async ({ session, params }) => getChat(session.address, str(params.id, "id"))))
+      .delete("/api/me/chats/:id", authed(async ({ session, params }) => { await deleteChat(session.address, str(params.id, "id")); return { ok: true }; }))
+      .delete("/api/me/chats", authed(async ({ session }) => { await deleteAllChats(session.address); return { ok: true }; }))
       .post("/api/me/target/suggest", authed(async ({ session, body }) => {
         const instruction = str((body as { instruction?: unknown } | null)?.instruction, "instruction");
         return suggestTarget(session.address, instruction);

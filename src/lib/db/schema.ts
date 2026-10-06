@@ -214,4 +214,31 @@ alter table transfers enable row level security;
 alter table chain_cursor enable row level security;
 `,
   },
+  {
+    // AI assistant conversations, kept per wallet so they survive a reload and can be listed and deleted.
+    id: "005_assistant_chats",
+    sql: `
+create table assistant_chats (
+  id text primary key,
+  address text not null references users(address),
+  title text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index assistant_chats_by_address on assistant_chats (address, updated_at desc);
+create table assistant_messages (
+  id bigserial primary key,
+  chat_id text not null references assistant_chats(id) on delete cascade,
+  role text not null,
+  content text not null,
+  blocks jsonb,
+  actions jsonb,
+  is_error boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create index assistant_messages_by_chat on assistant_messages (chat_id, id);
+alter table assistant_chats enable row level security;
+alter table assistant_messages enable row level security;
+`,
+  },
 ];
