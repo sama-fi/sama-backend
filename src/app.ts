@@ -84,6 +84,11 @@ const str = (v: unknown, name: string): string => {
   if (typeof v !== "string" || !v) throw new InputError(`${name} is required.`);
   return v;
 };
+/** The assistant takes { messages: [{ role, content }] }; a bare { message } still works as a one-turn chat. */
+const legacyTurns = (body: unknown): unknown => {
+  const b = (body ?? {}) as { messages?: unknown; message?: unknown };
+  return b.messages ?? [{ role: "user", content: str(b.message, "message") }];
+};
 const hex = (v: unknown, name: string): Hex => {
   const s = str(v, name);
   if (!/^0x[0-9a-fA-F]*$/.test(s)) throw new InputError(`${name} must be 0x-prefixed hex.`);
@@ -178,7 +183,7 @@ export function createApp() {
       }))
       // AI helper: turns a sentence into weights the user then edits and saves. Off unless a provider key is set.
       .get("/api/agent", open(async () => ({ enabled: agentInterpreter() !== null })))
-      .post("/api/me/assistant", authed(async ({ session, body }) => assist(session.address, str((body as { message?: unknown } | null)?.message, "message"))))
+      .post("/api/me/assistant", authed(async ({ session, body }) => assist(session.address, legacyTurns(body))))
       .post("/api/me/target/suggest", authed(async ({ session, body }) => {
         const instruction = str((body as { instruction?: unknown } | null)?.instruction, "instruction");
         return suggestTarget(session.address, instruction);
