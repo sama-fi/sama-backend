@@ -1,6 +1,8 @@
 import type { Address } from "viem";
-import { resolveGoal, type GoalPreview, type GoalSpec, type ResolveContext } from "@sama/agent";
-import type { ResidualStyle, Target, TargetPreview } from "@sama/api-types";
+import { claudeInterpreter, groqInterpreter, openAiCompatibleInterpreter, planGoal, resolveGoal, type GoalInterpreter, type GoalPreview, type GoalSpec, type ResolveContext } from "@sama/agent";
+import type { ResidualStyle, Target, TargetPreview, TargetSuggestion } from "@sama/api-types";
+import { env } from "./env.ts";
+import { log } from "./log.ts";
 import type { ExecutionPolicy, Holding } from "@sama/portfolio";
 import type { AssetUid } from "@sama/shared";
 import { deps } from "./deps.ts";
@@ -94,7 +96,7 @@ export async function checkTarget(address: Address, target: Omit<SavedTarget, "u
   return result.ok ? { ok: true, preview: result.preview, prices: ctx.prices } : { ok: false, problems: result.problems.map((p) => p.detail) };
 }
 
-/** The trades that would move the wallet to the target at current prices; moves under $1 are not shown. */
+/** The trades that would move the wallet to the target at current prices; moves under one cent are not shown. A $1 floor hid every trade (and zeroed the sell/buy totals) for small wallets. */
 export function toWirePreview(check: TargetCheck): TargetPreview {
   // An empty wallet is not an error: the target is valid and can be saved; the note explains why there are no trades.
   if (!check.ok) return check.emptyWallet ? { ok: true, problems: check.problems, trades: [] } : { ok: false, problems: check.problems, trades: [] };
@@ -105,9 +107,58 @@ export function toWirePreview(check: TargetCheck): TargetPreview {
       const price = check.prices.get(t.uid) ?? 0n;
       return { symbol: t.symbol, side: t.deltaUsdE18 < 0n ? ("SELL" as const) : ("BUY" as const), valueUsd: usd(value), amountTokens: price > 0n ? tokensOf((value * 10n ** 18n) / price) : 0 };
     })
-    .filter((t) => t.valueUsd >= 1)
+    .filter((t) => t.valueUsd >= 0.01)
     .sort((a, b) => b.valueUsd - a.valueUsd);
   return { ok: true, problems: [], trades };
+}
+
+/** The interpreter for the configured provider (Groq first, then Anthropic), or null when no key is set. */
+export function agentInterpreter(): GoalInterpreter | null {
+  const provider = env().agentProvider;
+  if (provider === "CUSTOM") return openAiCompatibleInterpreter(process.env.AI_API_KEY ?? "", process.env.AI_BASE_URL ?? "", process.env.AI_MODEL || "gpt-4o-mini");
+  if (provider === "GROQ") return groqInterpreter(process.env.GROQ_API_KEY ?? "");
+  if (provider === "ANTHROPIC") return claudeInterpreter();
+  return null;
+}
+
+/**
+ * Sentence → percent weights. The model only reads the sentence into a structured goal; the resolver turns it into
+ * exact values against the wallet's live holdings and every ticker is checked against the allowlist. Nothing is saved:
+ * the user reviews the weights in the editor, where the normal preview and save rules apply.
+ */
+export async function suggestTarget(address: Address, instruction: string, interpreter: GoalInterpreter | null = agentInterpreter()): Promise<TargetSuggestion> {
+  if (!interpreter) throw new InputError("The AI helper is not turned on.");
+  const text = instruction.trim();
+  if (!text) throw new InputError("Tell the helper what you want first.");
+  if (text.length > 500) throw new InputError("Keep the request under 500 characters.");
+  const portfolio = await loadPortfolio(address);
+  if (!portfolio.ok) return { ok: false, problems: [portfolio.detail] };
+  if (portfolio.holdings.length === 0) return { ok: false, problems: [EMPTY_WALLET_NOTE] };
+  const ctx = await resolveContext(portfolio);
+  let planned;
+  try {
+    planned = await planGoal(text, interpreter, ctx, policyFor({ costCapBps: 100, residualStyle: "ECONOMIC" }, ctx.nowSec));
+  } catch (error) {
+    log("agent.failed", { error: (error as Error).message.split("\n")[0] }, "error");
+    throw new InputError("The AI helper could not read that. Try rephrasing it.");
+  }
+  if (!planned.result.ok) return { ok: false, problems: planned.result.problems.map((p) => p.detail) };
+  const { tokens, cashTargetUsdE18 } = planned.result.preview;
+  const cash = deps().registry().cash();
+  const values = new Map<string, bigint>(tokens.map((t) => [t.symbol, t.targetUsdE18]));
+  if (!values.has(cash.symbol)) values.set(cash.symbol, cashTargetUsdE18);
+  const total = [...values.values()].reduce((s, v) => s + v, 0n);
+  if (total <= 0n) return { ok: false, problems: ["The helper's result has no value to spread. Try rephrasing."] };
+  const weights: Record<string, number> = {};
+  for (const [symbol, value] of values) {
+    const pct = Math.round(Number((value * 10_000n) / total) / 100);
+    if (pct > 0) weights[symbol] = pct;
+  }
+  // Whole percents can drift off 100; the largest weight absorbs it.
+  const drift = 100 - Object.values(weights).reduce((s, v) => s + v, 0);
+  const largest = Object.keys(weights).reduce((a, b) => (weights[b]! > weights[a]! ? b : a), Object.keys(weights)[0] ?? "");
+  if (largest) weights[largest] = weights[largest]! + drift;
+  return { ok: true, weights };
 }
 
 export function toWireTarget(t: SavedTarget): Target {

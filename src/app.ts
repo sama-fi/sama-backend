@@ -17,7 +17,8 @@ import { assetList, loadPortfolio, toWirePortfolio } from "./lib/market.ts";
 import { decide, swapBuild, swapPrepare, swapRecord } from "./lib/residuals.ts";
 import { approvalPayload, closeCollection, currentOrOpenRound, getRound, intentSigningPayload, prepareIntent, recordSettlement, settleCall, submitApproval, submitIntent } from "./lib/rounds.ts";
 import { clearedSessionCookie, requireSession, sessionCookie, type Session } from "./lib/session.ts";
-import { checkTarget, normalizeTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
+import { assist } from "./lib/assistant.ts";
+import { agentInterpreter, checkTarget, normalizeTarget, suggestTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
 import { getSettings, getTarget, onboardingDone, pageActivity, saveOnboardingDone, saveSettings, saveTarget, settingsProblems, upsertUser, type ActivityGroup, type ActivityQuery } from "./lib/users.ts";
 import { syncTransfers } from "./lib/transfers.ts";
 import { clearPreview, homeView, roundView } from "./lib/views.ts";
@@ -174,6 +175,13 @@ export function createApp() {
           throw error;
         }
         return toWirePreview(await checkTarget(session.address, target));
+      }))
+      // AI helper: turns a sentence into weights the user then edits and saves. Off unless a provider key is set.
+      .get("/api/agent", open(async () => ({ enabled: agentInterpreter() !== null })))
+      .post("/api/me/assistant", authed(async ({ session, body }) => assist(session.address, str((body as { message?: unknown } | null)?.message, "message"))))
+      .post("/api/me/target/suggest", authed(async ({ session, body }) => {
+        const instruction = str((body as { instruction?: unknown } | null)?.instruction, "instruction");
+        return suggestTarget(session.address, instruction);
       }))
       .get("/api/me/target", authed(async ({ session }) => {
         const t = await getTarget(session.address);

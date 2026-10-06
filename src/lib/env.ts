@@ -37,7 +37,8 @@ function read() {
     devAuth: e.SAMA_DEV_AUTH === "1" && !production,
     /** Cross-site cookie (frontend and API on different sites) needs SameSite=None; Partitioned. */
     crossSiteCookie: e.SAMA_CROSS_SITE_COOKIE === "1",
-    agentProvider: e.GROQ_API_KEY ? ("GROQ" as const) : e.ANTHROPIC_API_KEY ? ("ANTHROPIC" as const) : null,
+    /** AI_BASE_URL + AI_API_KEY: any OpenAI-compatible gateway (AI_MODEL names the model). Otherwise Groq, then Anthropic. */
+    agentProvider: e.AI_API_KEY && e.AI_BASE_URL ? ("CUSTOM" as const) : e.GROQ_API_KEY ? ("GROQ" as const) : e.ANTHROPIC_API_KEY ? ("ANTHROPIC" as const) : null,
     cronIntervalSec: Number(e.SAMA_CRON_INTERVAL_SEC ?? 60),
   };
 }
