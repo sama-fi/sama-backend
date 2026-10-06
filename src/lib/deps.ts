@@ -4,6 +4,7 @@ import { BinanceWeb3Client, fetchRwaPrices, fetchRwaTokens, type RwaPrice, type 
 import { bscChain } from "@sama/shared";
 import { env } from "./env.ts";
 import { providerHost } from "./log.ts";
+import { WBNB_ADDRESS, withBnbPrice } from "./spot.ts";
 import { verifyPrivyAccessToken, type PrivyIdentity } from "./privy.ts";
 
 export type Providers = { executor: string; verifier: string; independent: boolean; fallbackReason?: string };
@@ -43,7 +44,7 @@ function defaults(): Deps {
       return { client: createPublicClient({ chain: bscChain(e.verifierRpcUrl), transport: http(e.verifierRpcUrl) }) as PublicClient, providers: { executor, verifier, independent: executor !== verifier } };
     },
     registry: () => bscRegistry(),
-    fetchPrices: (addresses) => fetchRwaPrices(binanceClient(), env().chainId, addresses),
+    fetchPrices: async (addresses) => withBnbPrice(await fetchRwaPrices(binanceClient(), env().chainId, addresses.filter((a) => a.toLowerCase() !== WBNB_ADDRESS)), addresses),
     fetchStatus: () => fetchRwaTokens(binanceClient(), env().chainId),
     verifyPrivy: (token, address) => verifyPrivyAccessToken(token, address),
     nowSec: () => Math.floor(Date.now() / 1000),

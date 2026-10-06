@@ -114,7 +114,7 @@ export async function syncTransfers(): Promise<{ scannedTo: string; recorded: nu
   const users = new Set((await database.query<{ address: string }>("select address from users")).map((r) => key(r.address)));
   const settlements = new Set((await database.query<{ tx: string }>("select settlement_tx as tx from rounds where settlement_tx is not null")).map((r) => r.tx.toLowerCase()));
   const registry = new Map<string, TokenMeta>();
-  for (const a of [d.registry().cash(), ...d.registry().stocks()]) registry.set(a.contractAddress.toLowerCase(), { symbol: a.symbol, decimals: a.decimals, logo: "" });
+  for (const a of [d.registry().cash(), ...d.registry().crypto(), ...d.registry().stocks()]) registry.set(a.contractAddress.toLowerCase(), { symbol: a.symbol, decimals: a.decimals, logo: "" });
 
   const blockTimes = new Map<bigint, Date>();
   const blockTime = async (n: bigint) => {

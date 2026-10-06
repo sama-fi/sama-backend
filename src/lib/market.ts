@@ -26,9 +26,10 @@ export async function displayPrices(): Promise<Map<AssetUid, bigint>> {
   if (display && Date.now() - display.at < DISPLAY_TTL_MS) return display.prices;
   inflight ??= (async () => {
     const reg = deps().registry();
-    const raw = await deps().fetchPrices(reg.stocks().map((a) => a.contractAddress));
+    const priced = [...reg.crypto(), ...reg.stocks()];
+    const raw = await deps().fetchPrices(priced.map((a) => a.contractAddress));
     const prices = new Map<AssetUid, bigint>([[reg.cash().uid, E18]]);
-    for (const a of reg.stocks()) {
+    for (const a of priced) {
       const p = raw.get(a.uid);
       if (p) prices.set(a.uid, priceE18(p.tokenPrice));
     }
@@ -53,7 +54,7 @@ export function toWireAsset(a: CanonicalAsset, price: bigint | undefined): Asset
     decimals: a.decimals,
     class: a.class,
     priceUsd: price === undefined ? 0 : usd(price),
-    ...(a.class === "CASH" ? {} : { disclosure: DISCLOSURE }),
+    ...(a.class === "STOCK" || a.class === "ETF" ? { disclosure: DISCLOSURE } : {}),
     tier: a.tier,
     leveraged: a.leveraged,
     uiMultiplier: Number(a.currentMultiplierE18) / 1e18,
@@ -65,7 +66,7 @@ export function toWireAsset(a: CanonicalAsset, price: bigint | undefined): Asset
 export async function assetList(): Promise<Asset[]> {
   const reg = deps().registry();
   const prices = await displayPrices().catch(() => new Map<AssetUid, bigint>());
-  return [reg.cash(), ...reg.stocks()].map((a) => toWireAsset(a, prices.get(a.uid)));
+  return [reg.cash(), ...reg.crypto(), ...reg.stocks()].map((a) => toWireAsset(a, prices.get(a.uid)));
 }
 
 export type Holding = { asset: CanonicalAsset; rawBalance: bigint; priceE18: bigint; valueE18: bigint };
