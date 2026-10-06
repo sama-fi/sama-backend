@@ -6,14 +6,21 @@ set -euo pipefail
 SAMA_DIR="${SAMA_DIR:-$HOME/sama}"
 BUN="${BUN:-/usr/local/bin/bun}"
 
+# `bun install` can rewrite bun.lock on the server (newer bun, a workspace the committed lockfile did not list yet).
+# That is never a deliberate edit, and a dirty lockfile makes the next `git pull --ff-only` refuse. Drop it first.
+pull() {
+  git checkout -- bun.lock 2>/dev/null || true
+  git pull --ff-only
+}
+
 echo "==> sama-packages"
 cd "$SAMA_DIR/sama-packages"
-git pull --ff-only
+pull
 "$BUN" install
 
 echo "==> sama-backend"
 cd "$SAMA_DIR/sama-backend"
-git pull --ff-only
+pull
 "$BUN" install
 
 echo "==> restart sama-backend"
