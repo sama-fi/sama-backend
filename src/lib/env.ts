@@ -29,6 +29,8 @@ function read() {
     binanceKey: e.BINANCE_WEB3_API_KEY || undefined,
     binanceSecret: e.BINANCE_WEB3_API_SECRET || undefined,
     binanceBaseUrl: e.BINANCE_WEB3_BASE_URL || undefined,
+    /** CoinGecko Demo API key for token charts and trades. Optional: without it the free per-IP limit applies. */
+    coingeckoKey: e.COINGECKO_API_KEY || undefined,
     allowedOrigins: (e.SAMA_ALLOWED_ORIGINS ?? "http://localhost:3200").split(",").map((s) => s.trim()).filter(Boolean),
     appOrigin: e.SAMA_APP_ORIGIN || "http://localhost:3200",
     /** Plans whose crossed value exceeds this (USD) are refused while the contract is unaudited. */

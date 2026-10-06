@@ -51,7 +51,7 @@ function defaults(): Deps {
     fetchPrices: async (addresses) => withBnbPrice(await fetchRwaPrices(binanceClient(), env().chainId, addresses.filter((a) => a.toLowerCase() !== WBNB_ADDRESS)), addresses),
     fetchStatus: () => fetchRwaTokens(binanceClient(), env().chainId),
     verifyPrivy: (token, address) => verifyPrivyAccessToken(token, address),
-    market: () => (geckoterminal ??= new GeckoTerminalClient()),
+    market: () => (geckoterminal ??= new GeckoTerminalClient(env().coingeckoKey ? { apiKey: env().coingeckoKey as string } : {})),
     nowSec: () => Math.floor(Date.now() / 1000),
   };
 }
