@@ -20,6 +20,7 @@ import { clearedSessionCookie, requireSession, sessionCookie, type Session } fro
 import { chatAssist, deleteAllChats, deleteChat, getChat, listChats } from "./lib/assistant-chats.ts";
 import { agentInterpreter, checkTarget, normalizeTarget, suggestTarget, toWirePreview, toWireTarget, type TargetInput } from "./lib/targets.ts";
 import { getSettings, getTarget, onboardingDone, pageActivity, saveOnboardingDone, saveSettings, saveTarget, settingsProblems, upsertUser, type ActivityGroup, type ActivityQuery } from "./lib/users.ts";
+import { parseRange, tokenHistory, tokenStats, tokenTrades } from "./lib/token-market.ts";
 import { syncTransfers } from "./lib/transfers.ts";
 import { clearPreview, homeView, roundView } from "./lib/views.ts";
 
@@ -148,6 +149,10 @@ export function createApp() {
       // Assets, invites and proof (public) -------------------------------------------------------------------------------
       .get("/api/assets", open(async () => assetList()))
       .get("/api/proof", open(async () => proofData()))
+      // Token pages: open like /api/assets, but only for assets Sama lists. GeckoTerminal answers are cached and shared.
+      .get("/api/market/:token", open(async ({ params }) => tokenStats(str(params.token, "token"))))
+      .get("/api/market/:token/history", open(async ({ params, query }) => ({ points: await tokenHistory(str(params.token, "token"), parseRange(query.range)) })))
+      .get("/api/market/:token/trades", open(async ({ params }) => ({ trades: await tokenTrades(str(params.token, "token")) })))
       .get("/api/invites/:code", open(async ({ params }) => {
         const t = await inviteTarget(str(params.code, "code"));
         return { circleId: t.circleId, circleName: t.circleName, used: t.used };

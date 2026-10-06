@@ -1,4 +1,5 @@
 import { BinanceApiError } from "@sama/binance";
+import { MarketApiError } from "@sama/market";
 import { PancakeQuoteError } from "@sama/pancakeswap";
 import { log } from "./log.ts";
 
@@ -23,6 +24,10 @@ export function classify(error: unknown): { status: number; message: string } | 
   if (error instanceof BinanceApiError) {
     log("dependency.down", { dependency: "binance", status: error.status, code: error.code }, "error");
     return { status: 503, message: "Binance prices are not available right now. Try again shortly." };
+  }
+  if (error instanceof MarketApiError) {
+    log("dependency.down", { dependency: "geckoterminal", status: error.status }, "error");
+    return { status: 503, message: "Market data is not available right now. Try again shortly." };
   }
   const e = error as { name?: string; code?: string; message?: string };
   const message = e.message ?? "";

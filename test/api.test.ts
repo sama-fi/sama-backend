@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { PublicClient } from "viem";
 import type { RwaPrice } from "@sama/binance";
+import { GeckoTerminalClient } from "@sama/market";
 import { createApp } from "../src/app.ts";
 import { resetDb } from "../src/lib/db/client.ts";
-import { resetDeps, setDeps } from "../src/lib/deps.ts";
+import { deps, resetDeps, setDeps } from "../src/lib/deps.ts";
 import { resetEnv } from "../src/lib/env.ts";
 import { resetDisplayCache } from "../src/lib/market.ts";
 import { Client, DEV_KEYS, testEnv } from "./helpers.ts";
@@ -81,12 +82,16 @@ describe("assets", () => {
   it("serves USDT plus every bStock with tier, multiplier, disclosure and logo", async () => {
     const { status, body } = await alice.get("/api/assets");
     expect(status).toBe(200);
-    expect(body.length).toBe(89);
+    expect(body.length).toBe(90);
     expect(body[0]).toMatchObject({ symbol: "USDT", class: "CASH", priceUsd: 1, uid: "56:0x55d398326f99059fF775485246999027B3197955" });
     const nvda = body.find((a: { symbol: string }) => a.symbol === "NVDAB");
     expect(nvda).toMatchObject({ class: "STOCK", tier: "A", priceUsd: 100, logoUrl: "/assets/NVDAB.png" });
     expect(nvda.disclosure).toMatch(/backed 1:1/);
     expect(nvda.uiMultiplier).toBeGreaterThan(1);
+    // WBNB is the one non-bStock asset: crypto class, 1x, and no bStock disclosure.
+    const wbnb = body.find((a: { symbol: string }) => a.symbol === "WBNB");
+    expect(wbnb).toMatchObject({ class: "CRYPTO", tier: "A", uiMultiplier: 1, uid: "56:0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c" });
+    expect(wbnb.disclosure).toBeUndefined();
   });
 });
 
@@ -177,5 +182,63 @@ describe("circles and invites", () => {
   it("returns 404 for unknown rounds and circles", async () => {
     expect((await alice.get("/api/rounds/0xdead")).status).toBe(404);
     expect((await alice.get("/api/circles/0xdead")).status).toBe(404);
+  });
+});
+
+describe("market data", () => {
+  const NVDAB = "0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436";
+  const POOL = "0x8fb4243b553ac29ba088acf00b9b7da24bd6690c";
+  const calls: string[] = [];
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const path = String(input).replace("https://api.geckoterminal.com/api/v2/networks/bsc", "");
+    calls.push(path);
+    const body = path.startsWith(`/tokens/${NVDAB}/pools`)
+      ? { data: [{ attributes: { address: POOL, name: "NVDAB / USDT 0.25%" } }] }
+      : path === `/tokens/${NVDAB}`
+        ? { data: { attributes: { price_usd: "239.03", market_cap_usd: "43972919.5", fdv_usd: "44015937.2", normalized_total_supply: "184143.28", total_reserve_in_usd: "3319078.3", volume_usd: { h24: "13470829.2" } } } }
+        : path.includes("/ohlcv/")
+          ? { data: { attributes: { ohlcv_list: [[1791244800, 1, 2, 0.5, 239.6, 9], [1791158400, 1, 2, 0.5, 234.7, 9]] } } }
+          : { data: [] };
+    return new Response(JSON.stringify(body), { status: 200 });
+  }) as typeof fetch;
+  const original = () => deps().market;
+
+  it("serves stats, history and trades for a listed token without a session, by address or symbol", async () => {
+    const before = original();
+    setDeps({ market: () => new GeckoTerminalClient({ fetchImpl }) });
+    try {
+      const anon = new Client(app, DEV_KEYS[3]);
+      const stats = await anon.get(`/api/market/${NVDAB}`);
+      expect(stats.status).toBe(200);
+      expect(stats.body).toMatchObject({ priceUsd: 239.03, marketCapUsd: 43972919.5, poolAddress: POOL, poolName: "NVDAB / USDT 0.25%" });
+      expect((await anon.get("/api/market/nvdab")).body.poolAddress).toBe(POOL);
+
+      const history = await anon.get(`/api/market/${NVDAB}/history?range=1W`);
+      expect(history.body.points).toEqual([{ t: 1791158400_000, usd: 234.7 }, { t: 1791244800_000, usd: 239.6 }]);
+      expect(calls.find((c) => c.includes("/ohlcv/hour"))).toContain(`token=${NVDAB}`);
+
+      expect((await anon.get(`/api/market/${NVDAB}/trades`)).body).toEqual({ trades: [] });
+    } finally {
+      setDeps({ market: before });
+    }
+  });
+
+  it("refuses tokens Sama does not list, and a range it does not know", async () => {
+    const anon = new Client(app, DEV_KEYS[3]);
+    expect((await anon.get("/api/market/0x1111111111111111111111111111111111111111")).status).toBe(404);
+    expect((await anon.get("/api/market/NOTASTOCK")).status).toBe(404);
+    expect((await anon.get(`/api/market/${NVDAB}/history?range=5Y`)).status).toBe(400);
+  });
+
+  it("answers 503 with a plain message when GeckoTerminal is down and nothing is cached", async () => {
+    const before = original();
+    setDeps({ market: () => new GeckoTerminalClient({ fetchImpl: (async () => new Response("", { status: 500 })) as unknown as typeof fetch }) });
+    try {
+      const r = await new Client(app, DEV_KEYS[3]).get(`/api/market/${NVDAB}`);
+      expect(r.status).toBe(503);
+      expect(r.body.error).toMatch(/Market data is not available/);
+    } finally {
+      setDeps({ market: before });
+    }
   });
 });

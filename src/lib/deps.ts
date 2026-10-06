@@ -1,6 +1,7 @@
 import { createPublicClient, http, type Address, type PublicClient } from "viem";
 import { bscRegistry, type AssetRegistry } from "@sama/assets";
 import { BinanceWeb3Client, fetchRwaPrices, fetchRwaTokens, type RwaPrice, type RwaStatus } from "@sama/binance";
+import { GeckoTerminalClient } from "@sama/market";
 import { bscChain } from "@sama/shared";
 import { env } from "./env.ts";
 import { providerHost } from "./log.ts";
@@ -22,10 +23,13 @@ export type Deps = {
   /** Binance trading status keyed by lowercase address (incomplete list; only blocking codes matter). */
   fetchStatus: () => Promise<Map<string, { statusInfo: RwaStatus }>>;
   verifyPrivy: (token: string, address: string) => Promise<PrivyIdentity>;
+  /** Token charts, size and trades from on-chain pools. One shared client, so its cache serves every request. */
+  market: () => GeckoTerminalClient;
   nowSec: () => number;
 };
 
 let binance: BinanceWeb3Client | undefined;
+let geckoterminal: GeckoTerminalClient | undefined;
 
 function binanceClient(): BinanceWeb3Client {
   const e = env();
@@ -47,6 +51,7 @@ function defaults(): Deps {
     fetchPrices: async (addresses) => withBnbPrice(await fetchRwaPrices(binanceClient(), env().chainId, addresses.filter((a) => a.toLowerCase() !== WBNB_ADDRESS)), addresses),
     fetchStatus: () => fetchRwaTokens(binanceClient(), env().chainId),
     verifyPrivy: (token, address) => verifyPrivyAccessToken(token, address),
+    market: () => (geckoterminal ??= new GeckoTerminalClient()),
     nowSec: () => Math.floor(Date.now() / 1000),
   };
 }
